@@ -1,0 +1,172 @@
+@startuml
+title Система мониторинга и обработки логов внутренних сервисов — сиквенс (вариант 3)
+
+actor "Источник\n(внутренний сервис)" as Src
+control "Диспетчер постановки" as DP
+queue "Буфер" as Buf
+control "Диспетчер выбора" as DV
+participant "Приборы П1..Пm\n(обработчики логов)" as Dev
+queue "Календарь\nсобытий" as Cal
+participant "Статистика и\nвременная диаграмма" as St
+
+note over Src
+ИБ — бесконечный источник
+ИЗ1 — пуассоновский поток:
+интервалы между заявками
+распределены экспоненциально
+end note
+
+note over Buf
+Д1ОЗ1 — постановка по кольцу
+Д1ОО3 — отказ «самая старая в буфере»
+
+Д2Б3 — выбор заявки по кольцу:
+поиск занятого места от selectPointer,
+после выбора selectPointer = позиция + 1
+end note
+
+note over DV, Dev
+Д2П1 — выбор прибора по приоритету номера:
+перебор П1, П2, … Пm, берётся
+первый свободный (указателя нет)
+
+ПЗ2 — время обслуживания
+распределено равномерно на [a; b]
+end note
+
+
+== Триггер: событие REQUEST_GENERATED — поступление новой заявки ==
+
+Cal -> Src: REQUEST_GENERATED(t)
+
+Src -> Src: generateRequest(t)\nсоздать заявку (i.n), createdAt = t, статус CREATED
+Src -> St: recordGenerated(заявка)
+
+Src -> DP: placeRequest(заявка, t)
+
+DP -> Buf: findFreeSlot()\nпоиск по кольцу начиная с putPointer (Д1ОЗ1)
+
+alt Свободное место найдено (буфер не полон)
+
+    Buf --> DP: позиция k
+
+    DP -> Buf: put(заявка, k)
+    Buf --> DP: заявка в буфере, статус IN_BUFFER,\nputPointer = k + 1
+
+else Полный обход кольца, свободных мест нет (буфер полон)
+
+    Buf --> DP: −1 (свободного места нет)
+
+    DP -> Buf: findOldestSlot()\nпо Д1ОО3: заявка с минимальным createdAt
+    Buf --> DP: позиция k самой старой заявки
+
+    DP -> Buf: eject(k)
+    Buf --> DP: выбитая заявка (самая старая)
+
+    DP -> DP: markRejected(t)\nстатус REJECTED, rejectedAt = t
+    DP -> St: recordRejected(выбитая заявка)
+
+    note right of St
+    Отказ получает выбитая старая заявка
+    её источника, а не новая заявка.
+    Приборы не отказывают — они бывают заняты.
+    end note
+
+    DP -> Buf: put(новая заявка, k)
+    Buf --> DP: новая заявка на месте выбитой, статус IN_BUFFER,\nputPointer = k + 1
+
+end
+
+DP -> DV: onRequestBuffered(t)\nтриггер: в буфере появилась заявка
+
+
+== Попытка поставить заявку на прибор ==
+
+DV -> Buf: hasRequests()
+Buf --> DV: true (только что поставили заявку)
+
+DV -> Dev: findFreeDevice()\nперебор П1..Пm, первый свободный (Д2П1)
+
+alt Свободный прибор найден (HappyFlow: БП был свободен и прибор свободен)
+
+    Dev --> DV: прибор Пj
+
+    DV -> Buf: selectByRing()\nпоиск занятого места от selectPointer (Д2Б3)
+    Buf --> DV: заявка r извлечена из БП,\nselectPointer = позиция + 1
+
+    DV -> Dev: startProcessing(r, t)\nPj.busy = true, статус PROCESSING
+
+    Dev -> Dev: generateServiceDuration()\nd ~ U[a; b] по ПЗ2
+    Dev --> DV: время завершения t + d
+
+    DV -> Cal: add(DEVICE_RELEASED(t + d, Пj, r))
+    DV -> St: recordServiceStart(r, Пj)
+
+else Все приборы заняты (прибор не отказывает, он занят)
+
+    Dev --> DV: свободных приборов нет
+
+    note over Buf
+    Заявка остаётся ждать в буфере
+    до наступления события DEVICE_RELEASED
+    end note
+
+    note over DV
+    ДВ ничего не делает:
+    следующий триггер — освобождение прибора
+    end note
+
+end
+
+
+== Цикл ожидания: заявки продолжают поступать, пока все приборы заняты ==
+
+loop Пока не наступило ближайшее DEVICE_RELEASED
+
+    Cal -> Src: REQUEST_GENERATED(t'')
+
+    ref over Src, Buf
+    Повтор разделов «Поступление новой заявки» и «Попытка поставить на прибор».
+    Если БП заполнится — снова выбивается самая старая заявка по Д1ОО3.
+    end ref
+
+end
+
+
+== Триггер: событие DEVICE_RELEASED — освобождение прибора ==
+
+Cal -> Dev: DEVICE_RELEASED(t₁, Пj, r)
+
+Dev -> Dev: finishProcessing(t₁)\nстатус заявки COMPLETED, completedAt = t₁, Пj.busy = false
+Dev -> St: recordCompleted(r, Пj)
+
+Dev -> DV: onDeviceReleased(t₁)\nтриггер: прибор освободился
+
+DV -> Buf: hasRequests()
+Buf --> DV: true / false
+
+alt В буфере есть заявки (сквозной сценарий: ожидавшая заявка уходит на прибор)
+
+    DV -> Dev: findFreeDevice()\nперебор П1..Пm (Д2П1)
+    Dev --> DV: первый свободный прибор Пk\n(освободившийся Пj или другой с меньшим номером)
+
+    DV -> Buf: selectByRing()\nпоиск занятого места от selectPointer (Д2Б3)
+    Buf --> DV: заявка r' извлечена из БП,\nselectPointer = позиция + 1
+
+    DV -> Dev: startProcessing(r', t₁)
+    Dev -> Dev: generateServiceDuration()\nd' ~ U[a; b] по ПЗ2
+    Dev --> DV: время завершения t₁ + d'
+
+    DV -> Cal: add(DEVICE_RELEASED(t₁ + d', Пk, r'))
+    DV -> St: recordServiceStart(r', Пk)
+
+else Буфер пуст
+
+    note over DV, Dev
+    Прибор Пj простаивает.
+    Система ожидает следующего
+    события REQUEST_GENERATED
+    end note
+
+end
+@enduml

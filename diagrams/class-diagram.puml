@@ -1,0 +1,373 @@
+@startuml
+
+title Диаграмма классов — система мониторинга и обработки логов (вариант 3)
+
+skinparam classAttributeIconSize 0
+left to right direction
+
+enum RequestStatus {
+    CREATED
+    IN_BUFFER
+    PROCESSING
+    COMPLETED
+    REJECTED
+}
+
+enum EventType {
+    DEVICE_RELEASED
+    REQUEST_GENERATED
+}
+
+class SimulationConfig {
+    - sourceCount: int
+    - intensities: double[]
+    - deviceCount: int
+    - minServiceTime: double
+    - maxServiceTime: double
+    - bufferCapacity: int
+    - targetRequestCount: int
+    - randomSeed: long
+
+    + getSourceCount(): int
+    + getIntensity(sourceId: int): double
+    + getDeviceCount(): int
+    + getMinServiceTime(): double
+    + getMaxServiceTime(): double
+    + getBufferCapacity(): int
+    + getTargetRequestCount(): int
+}
+
+class Request {
+    - sourceId: int
+    - sequenceNumber: int
+    - createdAt: double
+    - serviceStartedAt: double
+    - completedAt: double
+    - rejectedAt: double
+    - status: RequestStatus
+
+    + getLabel(): String
+    + getSourceId(): int
+    + getCreatedAt(): double
+    + markBuffered(): void
+    + markProcessing(time: double): void
+    + markCompleted(time: double): void
+    + markRejected(time: double): void
+    + getWaitingTime(): double
+    + getServiceTime(): double
+    + getSystemTime(): double
+}
+
+class Source {
+    - id: int
+    - intensity: double
+    - generatedCount: int
+    - random: Random
+
+    + generateRequest(time: double): Request
+    + getNextGenerationTime(time: double): double
+    + getGeneratedCount(): int
+}
+
+class Buffer {
+    - capacity: int
+    - slots: Request[]
+    - putPointer: int
+    - selectPointer: int
+
+    + findFreeSlot(): int
+    + put(request: Request, position: int): void
+    + findOldestSlot(): int
+    + eject(position: int): Request
+    + selectByRing(): Request
+    + hasRequests(): boolean
+    + isFull(): boolean
+    + getSlotsView(): Request[]
+    + getPutPointer(): int
+    + getSelectPointer(): int
+}
+
+class PlacementDispatcher {
+    - buffer: Buffer
+    - selectionDispatcher: SelectionDispatcher
+    - statistics: StatisticsCollector
+    - timeline: TimelineRecorder
+
+    + placeRequest(request: Request, time: double): void
+}
+
+class SelectionDispatcher {
+    - buffer: Buffer
+    - devices: Device[]
+    - eventCalendar: EventCalendar
+    - statistics: StatisticsCollector
+    - timeline: TimelineRecorder
+
+    + onRequestBuffered(time: double): void
+    + onDeviceReleased(time: double): void
+    - dispatchAvailable(time: double): void
+    - findFreeDevice(): Device
+}
+
+class Device {
+    - id: int
+    - currentRequest: Request
+    - busy: boolean
+    - busyFrom: double
+    - totalBusyTime: double
+    - minServiceTime: double
+    - maxServiceTime: double
+    - random: Random
+
+    + getId(): int
+    + isFree(): boolean
+    + startProcessing(request: Request, time: double): double
+    + finishProcessing(time: double): Request
+    + getTotalBusyTime(): double
+    - generateServiceDuration(): double
+}
+
+abstract class ScheduledEvent {
+    - time: double
+    - sequenceNumber: long
+
+    + getTime(): double
+    + getType(): EventType
+    + execute(engine: SimulationEngine): void
+}
+
+class RequestGeneratedEvent {
+    - source: Source
+
+    + getType(): EventType
+    + execute(engine: SimulationEngine): void
+}
+
+class DeviceReleasedEvent {
+    - device: Device
+    - request: Request
+
+    + getType(): EventType
+    + execute(engine: SimulationEngine): void
+}
+
+class EventCalendar {
+    - events: ScheduledEvent[]
+    - nextSequenceNumber: long
+
+    + add(event: ScheduledEvent): void
+    + next(): ScheduledEvent
+    + isEmpty(): boolean
+    + getSortedView(): ScheduledEvent[]
+}
+
+class SimulationEngine {
+    - currentTime: double
+    - config: SimulationConfig
+    - sources: Source[]
+    - devices: Device[]
+    - buffer: Buffer
+    - eventCalendar: EventCalendar
+    - placementDispatcher: PlacementDispatcher
+    - selectionDispatcher: SelectionDispatcher
+    - statistics: StatisticsCollector
+    - timeline: TimelineRecorder
+
+    + initialize(): void
+    + step(): SystemSnapshot
+    + run(): SummaryTable
+    ~ processRequestGenerated(event: RequestGeneratedEvent): void
+    ~ processDeviceReleased(event: DeviceReleasedEvent): void
+    - buildSnapshot(): SystemSnapshot
+}
+
+class StatisticsCollector {
+    - generatedBySource: Map
+    - rejectedBySource: Map
+    - completedBySource: Map
+    - waitingTimeSumBySource: Map
+    - waitingTimeSquareSumBySource: Map
+    - serviceTimeSumBySource: Map
+    - serviceTimeSquareSumBySource: Map
+    - systemTimeSumBySource: Map
+    - deviceBusyTime: Map
+
+    + recordGenerated(request: Request): void
+    + recordRejected(request: Request): void
+    + recordServiceStart(request: Request, device: Device): void
+    + recordCompleted(request: Request, device: Device): void
+
+    + getGeneratedCount(): int
+    + getRejectProbability(sourceId: int): double
+    + getAverageSystemTime(sourceId: int): double
+    + getAverageWaitingTime(sourceId: int): double
+    + getAverageServiceTime(sourceId: int): double
+    + getWaitingTimeVariance(sourceId: int): double
+    + getServiceTimeVariance(sourceId: int): double
+    + getDeviceUtilization(deviceId: int, totalTime: double): double
+    + buildSummaryTable(totalTime: double): SummaryTable
+}
+
+class TimelineRecorder {
+    - generationMarks: Map
+    - rejectionMarks: List
+    - serviceIntervals: Map
+
+    + recordGeneration(request: Request, time: double): void
+    + recordRejection(request: Request, time: double): void
+    + openServiceInterval(device: Device, request: Request, time: double): void
+    + closeServiceInterval(device: Device, time: double): void
+    + getTimelineView(): TimelineView
+}
+
+class SystemSnapshot {
+    - time: double
+    - calendarRows: ScheduledEvent[]
+    - sourceRows: Map
+    - bufferSlots: Request[]
+    - deviceStates: Map
+    - putPointer: int
+    - selectPointer: int
+    - rejectPercent: double
+    - timelineView: TimelineView
+
+    + getTime(): double
+    + getCalendarRows(): ScheduledEvent[]
+    + getBufferSlots(): Request[]
+    + getPutPointer(): int
+    + getSelectPointer(): int
+    + getRejectPercent(): double
+}
+
+class SummaryTable {
+    - rows: Map
+
+    + getRow(sourceId: int): Map
+    + getDeviceRow(deviceId: int): double
+}
+
+class TimelineView {
+    - generationMarks: Map
+    - rejectionMarks: List
+    - serviceIntervals: Map
+}
+
+ScheduledEvent <|-- RequestGeneratedEvent
+ScheduledEvent <|-- DeviceReleasedEvent
+
+RequestGeneratedEvent --> "1" Source
+DeviceReleasedEvent --> "1" Device
+DeviceReleasedEvent --> "1" Request
+
+ScheduledEvent --> EventType
+ScheduledEvent ..> SimulationEngine : выполняется движком
+
+Source ..> Request : создаёт
+
+PlacementDispatcher --> Buffer
+PlacementDispatcher --> SelectionDispatcher : уведомляет
+PlacementDispatcher --> StatisticsCollector
+PlacementDispatcher --> TimelineRecorder
+PlacementDispatcher ..> Request
+
+SelectionDispatcher --> Buffer
+SelectionDispatcher --> "1..*" Device
+SelectionDispatcher --> EventCalendar : планирует события
+SelectionDispatcher --> StatisticsCollector
+SelectionDispatcher --> TimelineRecorder
+
+Buffer "1" o-- "0..*" Request : хранит
+Device --> "0..1" Request : обрабатывает
+
+SimulationEngine --> SimulationConfig
+SimulationEngine --> "1..*" Source
+SimulationEngine --> "1..*" Device
+SimulationEngine --> Buffer
+SimulationEngine --> EventCalendar
+SimulationEngine --> PlacementDispatcher
+SimulationEngine --> SelectionDispatcher
+SimulationEngine --> StatisticsCollector
+SimulationEngine --> TimelineRecorder
+SimulationEngine ..> SystemSnapshot : формирует на шаге (ОД3)
+SimulationEngine ..> SummaryTable : возвращает по итогам (ОР1)
+
+StatisticsCollector ..> SummaryTable : строит
+TimelineRecorder ..> TimelineView : строит
+SystemSnapshot --> TimelineView
+
+EventCalendar "1" o-- "0..*" ScheduledEvent
+
+Request --> RequestStatus
+
+note right of EventCalendar
+События упорядочиваются по следующим правилам:
+1. Сначала по возрастанию времени.
+2. При одинаковом времени освобождение прибора
+   обрабатывается раньше генерации новой заявки.
+3. Если время и тип одинаковы, используется
+   порядковый номер sequenceNumber.
+end note
+
+note bottom of Buffer
+Д1ОЗ1 — постановка по кольцу:
+findFreeSlot() ищет свободное место от putPointer.
+put() после постановки сдвигает putPointer на позицию + 1.
+
+Д1ОО3 — отказ «самая старая в буфере»:
+если свободного места нет, findOldestSlot() находит
+заявку с минимальным createdAt, eject() её выбивает,
+новая заявка встаёт на то же место.
+
+Д2Б3 — выбор заявки по кольцу:
+selectByRing() ищет занятое место от selectPointer,
+извлекает заявку и сдвигает selectPointer на позицию + 1.
+end note
+
+note bottom of SelectionDispatcher
+Д2П1 — выбор прибора по приоритету номера:
+findFreeDevice() всегда перебирает приборы от П1
+и берёт первый свободный. Указателя прибора нет.
+
+Диспетчер выбора запускается только по триггерам:
+onRequestBuffered() — в буфере появилась заявка;
+onDeviceReleased() — прибор освободился.
+end note
+
+note bottom of Device
+ПЗ2 — равномерный закон обслуживания:
+generateServiceDuration() возвращает
+значение из U[minServiceTime; maxServiceTime].
+Прибор не отказывает: он может быть только занят.
+end note
+
+note bottom of Source
+ИБ — бесконечный источник.
+ИЗ1 — пуассоновский поток: getNextGenerationTime()
+добавляет к времени интервал Exp(intensity).
+end note
+
+note bottom of ScheduledEvent
+В календаре находятся только события,
+которые переводят модельное время вперёд:
+генерация заявки и освобождение прибора.
+
+Постановка в буфер, выбивание, выбор заявки
+и начало обработки выполняются сразу
+как последствия календарного события.
+end note
+
+note bottom of SystemSnapshot
+ОД3 — состояние шага для пошагового режима:
+календарь событий, источники, буфер,
+приборы, указатели, процент отказа
+и временная диаграмма.
+end note
+
+note bottom of SummaryTable
+ОР1 — сводная таблица результатов:
+вероятность отказа, среднее время пребывания,
+ожидания и обслуживания, их дисперсии
+и коэффициенты использования приборов.
+end note
+
+@enduml
