@@ -1,0 +1,39 @@
+@startuml
+title Диспетчер постановки — flowchart
+
+|Диспетчер постановки|
+start
+:Получить новую заявку\n(триггер: REQUEST_GENERATED);
+:placeRequest(заявка, t);
+
+|Буфер|
+:findFreeSlot()\nпоиск по кольцу от putPointer (Д1ОЗ1);
+
+if (Свободное место найдено?) then (да)
+    :put(заявка, k);
+    :putPointer = k + 1;
+else (нет, буфер полон)
+    :findOldestSlot()\nсамая старая заявка по createdAt (Д1ОО3);
+    :eject(k);
+
+    |Диспетчер постановки|
+    :Выбитая заявка получает\nстатус REJECTED;
+
+    |Статистика|
+    :recordRejected(выбитая заявка);
+
+    |Буфер|
+    :put(новая заявка, k);
+    :putPointer = k + 1;
+endif
+
+|Диспетчер постановки|
+:onRequestBuffered(t)\nпередать управление диспетчеру выбора;
+stop
+
+legend right
+Д1ОЗ1 — постановка по кольцу от putPointer
+Д1ОО3 — при полном буфере выбивается самая старая заявка
+Отказ получает выбитая заявка, а не новая
+end legend
+@enduml
