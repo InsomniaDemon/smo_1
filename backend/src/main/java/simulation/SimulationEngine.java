@@ -11,11 +11,16 @@ import statistics.StatisticsCollector;
 import java.util.*;
 
 public class SimulationEngine {
+    private static final int WIDTH = 100;
+    private static final double WINDOW_DURATION = 2.5;
+    private static final double CURRENT_TIME_POSITION = 0.75;
+
     private final SimulationConfig config;
     private final Scanner scanner;
     private final Random random = new Random();
     private final List<Source> sources = new ArrayList<>();
     private final List<Device> devices = new ArrayList<>();
+
     private final EventCalendar calendar = new EventCalendar();
     private final Buffer buffer;
     private final StatisticsCollector statistics;
@@ -44,24 +49,21 @@ public class SimulationEngine {
     }
 
     public void run() {
-        // Планируем первые поступления от всех бесконечных источников.
         for (Source source : sources) {
             double firstTime = source.getNextGenerationTime(0, random);
             calendar.addGeneration(firstTime, source.id);
         }
 
-        printInitialState();
+        boolean batch = config.automatic();
+
+        if (!batch) {
+            System.out.println("НАЧАЛЬНОЕ СОСТОЯНИЕ");
+            printState();
+        }
 
         while (!calendar.isEmpty()) {
             Event event = calendar.next();
             currentTime = event.time;
-
-            System.out.println();
-            System.out.println("============================================================");
-            System.out.printf("СЛЕДУЮЩЕЕ СОБЫТИЕ: t = %.4f | %s%n",
-                    currentTime, event.description());
-            System.out.println("Нажмите Enter для обработки события...");
-            scanner.nextLine();
 
             if (event.type == EventType.REQUEST_GENERATED) {
                 processGeneration(event);
@@ -69,11 +71,21 @@ public class SimulationEngine {
                 processDeviceRelease(event);
             }
 
-            printState();
+            if (!batch) {
+                System.out.println("============================================================");
+                System.out.println("Enter - следующий шаг, а - выполнить все оставшиеся шаги автоматически");
+                if(scanner.nextLine().equals("a")) {
+                    batch = true;
+                    continue;
+                }
+
+                printState();
+            }
         }
 
-        System.out.println();
-        System.out.println("Календарь событий пуст. Моделирование завершено.");
+        if (!batch) {
+            System.out.println("\nКалендарь событий пуст. Моделирование завершено.\n");
+        }
         statistics.printSummary(devices, currentTime);
     }
 
@@ -82,19 +94,9 @@ public class SimulationEngine {
         Request request = source.generate(currentTime);
         statistics.recordGenerated(request);
 
-        System.out.printf("СОБЫТИЕ: источник И%d сгенерировал заявку %s.%n",
-                source.id, request.id());
-
-        // Бесконечный источник моделируется ограниченным числом генераций
-        // для завершения учебного эксперимента.
         if (source.generatedCount < config.requestsPerSource()) {
             double nextTime = source.getNextGenerationTime(currentTime, random);
             calendar.addGeneration(nextTime, source.id);
-            System.out.printf("И%d: следующая генерация запланирована на t=%.4f.%n",
-                    source.id, nextTime);
-        } else {
-            System.out.printf("И%d: достигнут лимит генераций (%d).%n",
-                    source.id, config.requestsPerSource());
         }
 
         placementDispatcher.placeRequest(request, currentTime);
@@ -111,20 +113,11 @@ public class SimulationEngine {
         }
 
         statistics.recordCompleted(completed, device, currentTime);
-        System.out.printf("СОБЫТИЕ: П%d завершил обработку заявки %s. " +
-                        "Время обслуживания = %.4f.%n",
-                device.id, completed.id(), completed.serviceDuration);
 
         selectionDispatcher.dispatch(currentTime);
     }
 
-    private void printInitialState() {
-        System.out.println("НАЧАЛЬНОЕ СОСТОЯНИЕ");
-        printState();
-    }
-
     private void printState() {
-        System.out.println();
         System.out.printf("Текущее модельное время: %.4f%n", currentTime);
         printTemporalDiagram();
 
@@ -136,8 +129,8 @@ public class SimulationEngine {
 
         System.out.println("\nБуфер:");
         System.out.println(buffer.describe());
-        System.out.printf("Занято: %d/%d | Указатель постановки Д1ОЗ1: %d | " +
-                        "Указатель выборки Д2Б3: %d%n",
+        System.out.printf("Занято: %d/%d | Указатель постановки: %d | " +
+                        "Указатель выборки: %d%n",
                 buffer.size(), buffer.getCapacity(),
                 buffer.getPutPointer() + 1, buffer.getSelectPointer() + 1);
 
@@ -150,97 +143,124 @@ public class SimulationEngine {
                         device.id, device.currentRequest.id(), device.busyUntil);
             }
         }
-
-        printCalendar();
     }
 
-    /**
-     * ОД3: временные диаграммы динамики работы системы.
-     * По горизонтали отложено модельное время; строки показывают моменты
-     * генерации заявок источниками и интервалы занятости приборов.
-     */
     private void printTemporalDiagram() {
-        final int width = 64;
-        double diagramEnd = currentTime;
-        for (Device device : devices) {
-            diagramEnd = Math.max(diagramEnd, device.busyUntil);
-        }
-        if (diagramEnd <= 0.0) diagramEnd = 1.0;
+        final double windowDuration = WINDOW_DURATION;
 
-        System.out.println("\nВРЕМЕННЫЕ ДИАГРАММЫ (ОД3)");
-        System.out.printf("Интервал: t=0.0000 .. %.4f | текущий момент: %.4f%n",
-                diagramEnd, currentTime);
-        System.out.println("Метки источников: * — генерация заявки");
-        System.out.println("Приборы: [номер заявки] — обслуживание; >>> — выполняется сейчас; " +
-                "| — текущее модельное время");
+        double windowStart = currentTime - windowDuration * CURRENT_TIME_POSITION;
+        double windowEnd = windowStart + windowDuration;
+
+        int currentTimePosition = (int) (WIDTH * CURRENT_TIME_POSITION);
+
+        System.out.printf(
+                "Окно: %.4f .. %.4f | Текущее время: %.4f%n",
+                windowStart, windowEnd, currentTime
+        );
 
         for (Source source : sources) {
-            char[] line = blankTimeline(width);
+            char[] line = blankTimeline();
+
+            markCurrentTime(line, windowStart, windowEnd);
+
             for (double eventTime : source.generationTimes) {
-                int x = timelinePosition(eventTime, diagramEnd, width);
+                if (eventTime < windowStart || eventTime > windowEnd) {
+                    continue;
+                }
+
+                int x = timelinePosition(
+                        eventTime, windowStart, windowEnd
+                );
+
                 line[x] = '*';
             }
-            markCurrentTime(line, diagramEnd, width);
+
             System.out.printf("И%-3d %s%n", source.id, new String(line));
         }
 
         for (Device device : devices) {
-            char[] line = blankTimeline(width);
-            for (ServiceInterval interval : device.serviceHistory) {
-                int from = timelinePosition(interval.start(), diagramEnd, width);
-                int to = timelinePosition(interval.finish(), diagramEnd, width);
-                if (to < from) to = from;
-                for (int x = from; x <= to; x++) line[x] = '=';
+            char[] line = blankTimeline();
 
-                // Номер заявки ставится в начале интервала, если хватает места.
-                String id = interval.request().id();
-                for (int j = 0; j < id.length() && from + j < width && from + j <= to; j++) {
-                    line[from + j] = id.charAt(j);
+            for (ServiceInterval interval : device.serviceHistory) {
+                double visibleStart = Math.max(
+                        interval.start(), windowStart
+                );
+
+                double visibleFinish = Math.min(
+                        interval.finish(), windowEnd
+                );
+
+                if (visibleStart >= visibleFinish) {
+                    continue;
                 }
-                if (interval.start() <= currentTime && currentTime < interval.finish()) {
-                    int activeFrom = Math.max(from, timelinePosition(interval.start(), diagramEnd, width));
-                    int activeTo = Math.min(to, timelinePosition(currentTime, diagramEnd, width));
-                    for (int x = activeFrom; x <= activeTo; x++) {
-                        if (line[x] == '=') line[x] = '>';
+
+                int from = timelinePosition(
+                        visibleStart, windowStart, windowEnd
+                );
+
+                int to = timelinePosition(
+                        visibleFinish, windowStart, windowEnd
+                );
+
+                // Отображаем интервал обслуживания.
+                for (int x = from; x <= to; x++) {
+                    if (x < currentTimePosition && interval.start() <= currentTime && currentTime < interval.finish()) {
+                        line[x] = '>';
+                    } else {
+                        line[x] = '=';
+                    }
+                }
+
+                // Возвращаем ID заявки в начало интервала.
+                if (interval.start() >= windowStart
+                        && interval.start() <= windowEnd) {
+
+                    String id = interval.request().id();
+
+                    for (int j = 0;
+                         j < id.length() && from + j <= to && from + j < WIDTH;
+                         j++) {
+                        line[from + j] = id.charAt(j);
                     }
                 }
             }
-            markCurrentTime(line, diagramEnd, width);
+
+            markCurrentTime(line, windowStart, windowEnd);
+
             System.out.printf("П%-3d %s%n", device.id, new String(line));
         }
 
         System.out.print("     ");
-        System.out.printf("0%-" + Math.max(1, width - 12) + "s%.4f%n", "", diagramEnd);
-        System.out.println("     " + " ".repeat(Math.min(width, timelinePosition(currentTime, diagramEnd, width))) + "^ текущее время");
+        System.out.printf("%.2f", windowStart);
+
+        System.out.print(" ".repeat(Math.max(1, WIDTH - 8)));
+        System.out.printf("%.2f%n", windowEnd);
+
+        int currentPosition = timelinePosition(
+                currentTime, windowStart, windowEnd
+        );
+
+        System.out.println("     " + " ".repeat(currentPosition) + "^ текущее время " + (int) (currentTime * 100) / 100.0d);
     }
 
-    private char[] blankTimeline(int width) {
-        char[] line = new char[width];
-        Arrays.fill(line, '.');
-        return line;
+    private int timelinePosition(double time, double windowStart, double windowEnd) {
+        double relativeTime =
+                (time - windowStart) / (windowEnd - windowStart);
+
+        return Math.clamp((int) Math.round(relativeTime * (WIDTH - 1)), 0, WIDTH - 1);
     }
 
-    private int timelinePosition(double time, double end, int width) {
-        if (width <= 1 || end <= 0) return 0;
-        return Math.max(0, Math.min(width - 1,
-                (int) Math.round(time / end * (width - 1))));
-    }
+    private void markCurrentTime(char[] line, double windowStart, double windowEnd) {
+        int x = timelinePosition(
+                currentTime, windowStart, windowEnd
+        );
 
-    private void markCurrentTime(char[] line, double end, int width) {
-        int x = timelinePosition(currentTime, end, width);
         line[x] = '|';
     }
 
-    private void printCalendar() {
-        System.out.println("\nКалендарь будущих событий:");
-        List<Event> events = calendar.snapshot();
-        if (events.isEmpty()) {
-            System.out.println("(пуст)");
-            return;
-        }
-        System.out.printf("%-12s %-28s%n", "Время", "Событие");
-        for (Event event : events) {
-            System.out.printf("%-12.4f %-28s%n", event.time, event.description());
-        }
+    private char[] blankTimeline() {
+        char[] line = new char[WIDTH];
+        Arrays.fill(line, '.');
+        return line;
     }
 }

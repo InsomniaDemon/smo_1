@@ -30,21 +30,17 @@ public class SelectionDispatcher {
         this.random = random;
     }
 
-    // Вызывается после постановки заявки в буфер и после освобождения прибора.
+    // Вызывается после постановки заявки в буфер или после освобождения прибора.
     // Д2П1: первый свободный прибор по номеру. Д2Б3: выбор заявки по кольцу.
     public void dispatch(double time) {
         while (buffer.hasRequests()) {
             Device freeDevice = findFreeDevice();
             if (freeDevice == null) {
-                System.out.println("ДВ: свободных приборов нет. Заявки остаются в буфере.");
                 return;
             }
 
             Request request = buffer.selectByRing();
             if (request == null) return;
-
-            System.out.printf("ДВ: по Д2Б3 выбрана заявка %s; указатель выборки теперь на позиции %d.%n",
-                    request.id(), buffer.getSelectPointer() + 1);
 
             double finishTime = freeDevice.startProcessing(
                     request, time, serviceMin, serviceMax, random
@@ -52,10 +48,6 @@ public class SelectionDispatcher {
 
             statistics.recordServiceStart(request, freeDevice, time);
             calendar.addDeviceRelease(finishTime, freeDevice.id, request);
-
-            System.out.printf("ДВ: заявка %s отправлена на П%d; обслуживание U[%.3f; %.3f], " +
-                            "окончание в t=%.4f.%n",
-                    request.id(), freeDevice.id, serviceMin, serviceMax, finishTime);
         }
     }
 

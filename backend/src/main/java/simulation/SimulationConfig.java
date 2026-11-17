@@ -7,5 +7,6 @@ public record SimulationConfig(
         int requestsPerSource,
         double lambda,
         double serviceMin,
-        double serviceMax
+        double serviceMax,
+        boolean automatic
 ) {}

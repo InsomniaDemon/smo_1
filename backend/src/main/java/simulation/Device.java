@@ -23,9 +23,7 @@ public class Device {
     }
 
     // ПЗ2: равномерное время обслуживания U[a; b].
-    public double startProcessing(Request request, double time,
-                                  double serviceMin, double serviceMax,
-                                  Random random) {
+    public double startProcessing(Request request, double time, double serviceMin, double serviceMax, Random random) {
         double duration = serviceMin + random.nextDouble() * (serviceMax - serviceMin);
         currentRequest = request;
         request.status = RequestStatus.PROCESSING;

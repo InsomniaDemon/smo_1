@@ -10,8 +10,6 @@ import java.util.Map;
 
 public class StatisticsCollector {
     private final Map<Integer, SourceStatistics> bySource = new LinkedHashMap<>();
-    private long totalRejected;
-
     public StatisticsCollector(int sourceCount) {
         for (int i = 1; i <= sourceCount; i++) bySource.put(i, new SourceStatistics());
     }
@@ -22,7 +20,6 @@ public class StatisticsCollector {
 
     public void recordRejected(Request request) {
         bySource.get(request.sourceId).recordRejected();
-        totalRejected++;
     }
 
     public void recordServiceStart(Request request, Device device, double time) {
@@ -39,8 +36,8 @@ public class StatisticsCollector {
         System.out.println();
         System.out.println("================ ИТОГОВАЯ СТАТИСТИКА (ОР1) ================");
         System.out.printf("%-9s %9s %9s %9s %11s %11s %11s %11s %11s%n",
-                "Источник", "Создано", "Отказы", "Pотк",
-                "Tож ср.", "Tобсл ср.", "Tсист ср.", "Dож", "Dобсл");
+                "Источник", "Создано", "Отказы", "P отк",
+                "T ож ср.", "T обсл ср.", "Tсист ср.", "D ож", "D обсл");
 
         long generated = 0;
         long rejected = 0;

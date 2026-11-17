@@ -12,13 +12,11 @@ public class EventCalendar {
     private long nextOrder;
 
     public void addGeneration(double time, int sourceId) {
-        events.add(new Event(time, nextOrder++, EventType.REQUEST_GENERATED,
-                sourceId, -1, null));
+        events.add(new Event(time, nextOrder++, EventType.REQUEST_GENERATED, sourceId, -1));
     }
 
     public void addDeviceRelease(double time, int deviceId, Request request) {
-        events.add(new Event(time, nextOrder++, EventType.DEVICE_RELEASED,
-                -1, deviceId, request));
+        events.add(new Event(time, nextOrder++, EventType.DEVICE_RELEASED, -1, deviceId));
     }
 
     public Event next() {
@@ -27,11 +25,5 @@ public class EventCalendar {
 
     public boolean isEmpty() {
         return events.isEmpty();
-    }
-
-    public List<Event> snapshot() {
-        List<Event> result = new ArrayList<>(events);
-        Collections.sort(result);
-        return result;
     }
 }

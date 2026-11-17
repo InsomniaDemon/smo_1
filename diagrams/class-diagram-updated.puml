@@ -1,0 +1,247 @@
+@startuml
+
+title Диаграмма классов
+
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+
+class Source {
+    - id: int
+    - intensity: double
+    ~ generatedCount: int
+    ~ generationTimes: List<Double>
+    + Source(id, intensity)
+    + generate(time): Request
+    + getNextGenerationTime(currentTime, random): double
+}
+
+class Request {
+    + sourceId: int
+    + sequenceNumber: int
+    + createdAt: double
+    + status: RequestStatus
+    + serviceStartedAt: double
+    + completedAt: double
+    + serviceDuration: double
+    + Request(sourceId, sequenceNumber, createdAt)
+    + id(): String
+    + markRejected()
+    + toString(): String
+    - format(value): String
+}
+
+enum RequestStatus {
+    CREATED
+    IN_BUFFER
+    PROCESSING
+    COMPLETED
+    REJECTED
+}
+
+class PlacementDispatcher {
+    - buffer: Buffer
+    - statistics: StatisticsCollector
+    + PlacementDispatcher(buffer, statistics)
+    + placeRequest(request, time)
+}
+
+class Buffer {
+    - slots: Request[]
+    - putPointer: int
+    - selectPointer: int
+    ~ Buffer(capacity)
+    + findFreeSlot(): int
+    + put(request, position)
+    + findOldestSlot(): int
+    + eject(position): Request
+    + selectByRing(): Request
+    + hasRequests(): boolean
+    ~ size(): int
+    ~ describe(): String
+    ~ getCapacity(): int
+    + getPutPointer(): int
+    + getSelectPointer(): int
+}
+
+class SelectionDispatcher {
+    - buffer: Buffer
+    - devices: List<Device>
+    - calendar: EventCalendar
+    - statistics: StatisticsCollector
+    - serviceMin: double
+    - serviceMax: double
+    - random: Random
+    + SelectionDispatcher(buffer, devices, calendar, statistics, serviceMin, serviceMax, random)
+    + dispatch(time)
+    - findFreeDevice(): Device
+}
+
+class Device {
+    + id: int
+    ~ serviceHistory: List<ServiceInterval>
+    ~ currentRequest: Request
+    ~ busyUntil: double
+    + totalBusyTime: double
+    ~ Device(id)
+    + isFree(): boolean
+    + startProcessing(request, time, serviceMin, serviceMax, random): double
+    ~ finishProcessing(): Request
+}
+
+class ServiceInterval {
+    + request: Request
+    + start: double
+    + finish: double
+}
+
+class EventCalendar {
+    - events: PriorityQueue<Event>
+    - nextOrder: long
+    + addGeneration(time, sourceId)
+    + addDeviceRelease(time, deviceId, request)
+    + next(): Event
+    + isEmpty(): boolean
+}
+
+class Event {
+    + time: double
+    - order: long
+    + type: EventType
+    + sourceId: int
+    + deviceId: int
+    + Event(time, order, type, sourceId, deviceId)
+    + compareTo(other): int
+}
+
+enum EventType {
+    REQUEST_GENERATED
+    DEVICE_RELEASED
+}
+
+class StatisticsCollector {
+    - bySource: Map<Integer, SourceStatistics>
+    + StatisticsCollector(sourceCount)
+    + recordGenerated(request)
+    + recordRejected(request)
+    + recordServiceStart(request, device, time)
+    + recordCompleted(request, device, time)
+    + printSummary(devices, totalTime)
+}
+
+class SourceStatistics {
+    ~ generated: long
+    ~ rejected: long
+    ~ completed: long
+    - waitingSum: double
+    - waitingSquareSum: double
+    - serviceSum: double
+    - serviceSquareSum: double
+    - systemTimeSum: double
+    ~ recordGenerated()
+    ~ recordRejected()
+    ~ recordServiceStart(request, time)
+    ~ recordCompleted(request, time)
+    ~ rejectionProbability(): double
+    ~ averageWaiting(): double
+    ~ averageService(): double
+    ~ averageSystemTime(): double
+    ~ waitingVariance(): double
+    ~ serviceVariance(): double
+}
+
+class SimulationConfig {
+    + sourceCount: int
+    + deviceCount: int
+    + bufferCapacity: int
+    + requestsPerSource: int
+    + lambda: double
+    + serviceMin: double
+    + serviceMax: double
+    + automatic: boolean
+}
+
+class SimulationEngine {
+    - WIDTH: int
+    - WINDOW_DURATION: double
+    - CURRENT_TIME_POSITION: double
+    - config: SimulationConfig
+    - scanner: Scanner
+    - random: Random
+    - sources: List<Source>
+    - devices: List<Device>
+    - calendar: EventCalendar
+    - buffer: Buffer
+    - statistics: StatisticsCollector
+    - placementDispatcher: PlacementDispatcher
+    - selectionDispatcher: SelectionDispatcher
+    - currentTime: double
+    + SimulationEngine(config, scanner)
+    + run()
+    - processGeneration(event)
+    - processDeviceRelease(event)
+    - printState()
+    - printTemporalDiagram()
+    - timelinePosition(time, windowStart, windowEnd): int
+    - markCurrentTime(line, windowStart, windowEnd)
+    - blankTimeline(): char[]
+}
+
+SimulationEngine --> SimulationConfig
+SimulationEngine --> Source
+SimulationEngine --> Device
+SimulationEngine --> EventCalendar
+SimulationEngine --> Buffer
+SimulationEngine --> PlacementDispatcher
+SimulationEngine --> SelectionDispatcher
+SimulationEngine --> StatisticsCollector
+
+PlacementDispatcher --> Buffer
+PlacementDispatcher --> StatisticsCollector
+
+SelectionDispatcher --> Buffer
+SelectionDispatcher --> Device
+SelectionDispatcher --> EventCalendar
+SelectionDispatcher --> StatisticsCollector
+
+Source ..> Request : создаёт
+Buffer o-- Request
+Device --> Request
+Device *-- ServiceInterval
+ServiceInterval --> Request
+Request --> RequestStatus
+
+EventCalendar o-- Event
+Event --> EventType
+EventCalendar ..> Request
+
+StatisticsCollector *-- SourceStatistics
+StatisticsCollector ..> Request
+StatisticsCollector ..> Device
+
+note right of Buffer
+Д1ОЗ1: поиск свободного места по кольцу от putPointer
+Д1ОО3: при полном буфере вытесняется заявка
+с самым ранним временем поступления
+Д2Б3: выбор заявки по кольцу от selectPointer
+end note
+
+note right of SelectionDispatcher
+Д2П1: приборы перебираются с П1,
+выбирается первый свободный
+end note
+
+note right of Device
+ПЗ2: время обслуживания U[serviceMin; serviceMax]
+end note
+
+note right of Source
+ИБ, ИЗ1: интервалы между заявками
+имеют экспоненциальное распределение Exp(intensity)
+end note
+
+note bottom of StatisticsCollector
+Собирает статистику по каждому источнику
+и выводит итоговую сводку.
+end note
+
+@enduml

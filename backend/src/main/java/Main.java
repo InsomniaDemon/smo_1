@@ -6,10 +6,10 @@ import java.util.Map;
 import java.util.Scanner;
 
 public class Main {
-    private static final int DEFAULT_SOURCE_COUNT = 1;
-    private static final int DEFAULT_DEVICE_COUNT = 1;
-    private static final int DEFAULT_BUFFER_CAPACITY = 1;
-    private static final int DEFAULT_REQUESTS_PER_SOURCE = 1;
+    private static final int DEFAULT_SOURCE_COUNT = 3;
+    private static final int DEFAULT_DEVICE_COUNT = 2;
+    private static final int DEFAULT_BUFFER_CAPACITY = 5;
+    private static final int DEFAULT_REQUESTS_PER_SOURCE = 20;
     private static final double DEFAULT_LAMBDA = 0.8;
     private static final double DEFAULT_SERVICE_MIN = 0.8;
     private static final double DEFAULT_SERVICE_MAX = 1.2;
@@ -54,10 +54,7 @@ public class Main {
                     DEFAULT_SERVICE_MAX, serviceMin, Double.MAX_VALUE
             );
 
-            System.out.println("=== СИСТЕМА МОНИТОРИНГА И ОБРАБОТКИ ЛОГОВ ===");
-            System.out.println(
-                    "Вариант 3: ИБ ИЗ1 ПЗ2 Д1ОЗ1 Д1ОО3 Д2П1 Д2Б3 ОР1 ОД3\n"
-            );
+            boolean automatic = params.containsKey("automatic");
 
             System.out.println("Используемые параметры:");
             System.out.println("Количество источников: " + sourceCount);
@@ -66,7 +63,8 @@ public class Main {
             System.out.println("Заявок от каждого источника: " + requestsPerSource);
             System.out.println("Интенсивность lambda: " + lambda);
             System.out.println("Минимальное время обслуживания: " + serviceMin);
-            System.out.println("Максимальное время обслуживания: " + serviceMax + "\n");
+            System.out.println("Максимальное время обслуживания: " + serviceMax);
+            System.out.println("Режим: " + (automatic ? "Автоматический" : "Пошаговый") + "\n");
 
             SimulationConfig config = new SimulationConfig(
                     sourceCount,
@@ -75,7 +73,8 @@ public class Main {
                     requestsPerSource,
                     lambda,
                     serviceMin,
-                    serviceMax
+                    serviceMax,
+                    automatic
             );
 
             Scanner scanner = new Scanner(System.in);
@@ -118,13 +117,18 @@ public class Main {
                 );
             }
 
-            if (i + 1 >= args.length || args[i + 1].startsWith("--")) {
-                throw new IllegalArgumentException(
-                        "Не указано значение для параметра --" + key
-                );
+            if (key.equals("automatic")) {
+                params.put(key, key);
             }
+            else {
+                if (i + 1 >= args.length || args[i + 1].startsWith("--")) {
+                    throw new IllegalArgumentException(
+                            "Не указано значение для параметра --" + key
+                    );
+                }
 
-            params.put(key, args[++i]);
+                params.put(key, args[++i]);
+            }
         }
 
         return params;
@@ -138,7 +142,8 @@ public class Main {
                  "requests-per-source",
                  "lambda",
                  "service-min",
-                 "service-max" -> true;
+                 "service-max",
+                 "automatic"-> true;
             default -> false;
         };
     }
