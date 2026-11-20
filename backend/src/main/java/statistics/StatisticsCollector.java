@@ -37,7 +37,7 @@ public class StatisticsCollector {
         System.out.println("================ ИТОГОВАЯ СТАТИСТИКА (ОР1) ================");
         System.out.printf("%-9s %9s %9s %9s %11s %11s %11s %11s %11s%n",
                 "Источник", "Создано", "Отказы", "P отк",
-                "T ож ср.", "T обсл ср.", "Tсист ср.", "D ож", "D обсл");
+                "T ож ср.", "T обсл ср.", "T сист ср.", "D ож", "D обсл");
 
         long generated = 0;
         long rejected = 0;

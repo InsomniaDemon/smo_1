@@ -36,7 +36,7 @@ public class Main {
 
             int requestsPerSource = readInt(
                     params, "requests-per-source",
-                    DEFAULT_REQUESTS_PER_SOURCE, 1, 1_000_000
+                    DEFAULT_REQUESTS_PER_SOURCE, 1, 1000000
             );
 
             double lambda = readDouble(

@@ -1,7 +1,5 @@
 package request;
 
-import java.util.Locale;
-
 public class Request {
     public final int sourceId;
     public final int sequenceNumber;
@@ -23,14 +21,5 @@ public class Request {
 
     public void markRejected() {
         status = RequestStatus.REJECTED;
-    }
-
-    @Override
-    public String toString() {
-        return id() + "[t=" + format(createdAt) + "]";
-    }
-
-    private static String format(double value) {
-        return String.format(Locale.US, "%.4f", value);
     }
 }
